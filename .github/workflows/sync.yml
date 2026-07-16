@@ -76,7 +76,10 @@ jobs:
           url="https://github.com/glandium/git-cinnabar/releases/download/${CINNABAR_VERSION}/git-cinnabar.linux.x86_64.tar.xz"
           curl -sSfL "$url" -o /tmp/cinnabar.tar.xz
           mkdir -p "$HOME/.local/bin"
-          tar -xJf /tmp/cinnabar.tar.xz -C "$HOME/.local/bin"
+          # Tarball nests everything under a git-cinnabar/ dir; strip it so the
+          # two binaries land directly on PATH.
+          tar -xJf /tmp/cinnabar.tar.xz -C "$HOME/.local/bin" --strip-components=1
+          chmod +x "$HOME/.local/bin/git-cinnabar" "$HOME/.local/bin/git-remote-hg"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Verify toolchain
