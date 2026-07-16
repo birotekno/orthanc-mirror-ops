@@ -1,0 +1,31 @@
+# Orthanc Mercurial repos mirrored to github.com/birotekno
+# Source: https://orthanc.uclouvain.be/hg/
+# One repo name per line. Blank lines and # comments ignored.
+#
+# Excluded deliberately (marked [Discontinued] upstream):
+#   orthanc-client      - [Discontinued] C++ client to Orthanc
+#   orthanc-postgresql  - [Discontinued] Old PostgreSQL codebase; superseded by orthanc-databases
+
+orthanc
+orthanc-authorization
+orthanc-book
+orthanc-databases
+orthanc-dicomweb
+orthanc-education
+orthanc-gcp
+orthanc-gdcm
+orthanc-imagej
+orthanc-indexer
+orthanc-java
+orthanc-neuro
+orthanc-object-storage
+orthanc-ohif
+orthanc-python
+orthanc-stl
+orthanc-stone
+orthanc-tcia
+orthanc-tests
+orthanc-transfers
+orthanc-volview
+orthanc-webviewer
+orthanc-wsi

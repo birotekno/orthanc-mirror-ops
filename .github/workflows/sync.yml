@@ -1,0 +1,109 @@
+name: sync-orthanc-mirrors
+
+on:
+  schedule:
+    # 03:17 UTC ~= 10:17 WIB. Off-the-hour to avoid the cron thundering herd.
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      repos:
+        description: 'Space-separated repo names to sync (blank = all of repos.txt)'
+        required: false
+        default: ''
+
+concurrency:
+  # Never let two syncs race on the same mirror's refs.
+  group: sync-orthanc-mirrors
+  cancel-in-progress: false
+
+env:
+  # PINNED ON PURPOSE. Cinnabar's hg->git conversion is deterministic for a
+  # given version, which is what keeps our commit SHAs stable across syncs.
+  # A version bump could change the mapping and rewrite history at 3am.
+  # Upgrade deliberately, verify on one repo, then bump here.
+  CINNABAR_VERSION: '0.7.4'
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: set
+        # Input goes through env, never interpolated into the shell -- a
+        # dispatch input is attacker-controlled text and ${{ }} splices it in
+        # verbatim before bash ever sees it.
+        env:
+          INPUT_REPOS: ${{ github.event.inputs.repos }}
+        run: |
+          if [ -n "$INPUT_REPOS" ]; then
+            list="$INPUT_REPOS"
+          else
+            list=$(grep -vE '^\s*(#|$)' repos.txt | tr '\n' ' ')
+          fi
+          # Whitelist the shape of a repo name; anything else is rejected
+          # rather than passed on to a shell or a URL.
+          for r in $list; do
+            printf '%s' "$r" | grep -qE '^[A-Za-z0-9._-]+$' \
+              || { echo "::error::invalid repo name: $r"; exit 1; }
+          done
+          json=$(printf '%s' "$list" | tr ' ' '\n' | grep -v '^$' \
+            | jq -R . | jq -sc .)
+          echo "matrix=$json" >> "$GITHUB_OUTPUT"
+          echo "will sync: $json"
+
+  sync:
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      # One broken repo must not mask the state of the other 22.
+      fail-fast: false
+      # Be a polite guest on UCLouvain's server. Do not raise this.
+      max-parallel: 4
+      matrix:
+        repo: ${{ fromJson(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mercurial
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mercurial
+
+      - name: Install git-cinnabar (pinned ${{ env.CINNABAR_VERSION }})
+        run: |
+          url="https://github.com/glandium/git-cinnabar/releases/download/${CINNABAR_VERSION}/git-cinnabar.linux.x86_64.tar.xz"
+          curl -sSfL "$url" -o /tmp/cinnabar.tar.xz
+          mkdir -p "$HOME/.local/bin"
+          tar -xJf /tmp/cinnabar.tar.xz -C "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Verify toolchain
+        run: |
+          git cinnabar --version
+          hg --version | head -1
+          # Guard against a silently-swapped binary rewriting history.
+          test "$(git cinnabar --version)" = "git-cinnabar ${CINNABAR_VERSION}" \
+            || { echo "cinnabar version mismatch!"; exit 1; }
+
+      # Metadata is a speed cache ONLY -- cinnabar conversion is deterministic,
+      # so a cache miss costs time, never correctness. It is also mirrored to
+      # each repo's refs/cinnabar/metadata, so this is belt-and-braces.
+      - name: Restore cinnabar metadata cache
+        uses: actions/cache@v4
+        with:
+          path: .work/${{ matrix.repo }}
+          key: cinnabar-${{ env.CINNABAR_VERSION }}-${{ matrix.repo }}-${{ github.run_id }}
+          restore-keys: |
+            cinnabar-${{ env.CINNABAR_VERSION }}-${{ matrix.repo }}-
+
+      - name: Sync ${{ matrix.repo }}
+        env:
+          ORTHANC_MIRROR_TOKEN: ${{ secrets.ORTHANC_MIRROR_TOKEN }}
+          MIRROR_ORG: birotekno
+          REPO: ${{ matrix.repo }}
+        run: |
+          test -n "$ORTHANC_MIRROR_TOKEN" \
+            || { echo "::error::ORTHANC_MIRROR_TOKEN secret is not set"; exit 1; }
+          bash scripts/sync.sh "$REPO"
