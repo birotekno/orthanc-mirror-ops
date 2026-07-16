@@ -87,8 +87,13 @@ jobs:
           git cinnabar --version
           hg --version | head -1
           # Guard against a silently-swapped binary rewriting history.
-          test "$(git cinnabar --version)" = "git-cinnabar ${CINNABAR_VERSION}" \
-            || { echo "cinnabar version mismatch!"; exit 1; }
+          # Release binaries report "git-cinnabar <version>-<commit-sha>", while
+          # distro/brew builds report a bare "git-cinnabar <version>" -- so match
+          # on the version prefix, not the full string.
+          case "$(git cinnabar --version)" in
+            "git-cinnabar ${CINNABAR_VERSION}"|"git-cinnabar ${CINNABAR_VERSION}-"*) ;;
+            *) echo "::error::cinnabar version mismatch: got '$(git cinnabar --version)', pinned '${CINNABAR_VERSION}'"; exit 1 ;;
+          esac
 
       # Metadata is a speed cache ONLY -- cinnabar conversion is deterministic,
       # so a cache miss costs time, never correctness. It is also mirrored to
