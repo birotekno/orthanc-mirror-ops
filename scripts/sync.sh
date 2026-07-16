@@ -50,8 +50,24 @@ else
   log "$REPO: no metadata cache -- full conversion (slower, same result)"
 fi
 
+# orthanc.uclouvain.be is a single university-hosted server and it does time out
+# under concurrent load -- observed 2026-07-16, 4/23 CI jobs failed to even open
+# a TCP connection (~135s) while the rest succeeded. Transient upstream flakiness
+# must not fail a daily mirror, so retry with backoff before giving up.
 log "$REPO: fetching from mercurial"
-git fetch -q hg
+fetch_ok=0
+for attempt in 1 2 3; do
+  if git fetch -q hg; then fetch_ok=1; break; fi
+  if [ "$attempt" -lt 3 ]; then
+    backoff=$(( attempt * 60 ))
+    log "$REPO: hg fetch failed (attempt $attempt/3) -- upstream may be busy; retrying in ${backoff}s"
+    # A failed fetch can leave cinnabar's remote refs half-written; clear them
+    # so the retry starts from the restored metadata rather than a partial state.
+    git remote prune hg >/dev/null 2>&1 || true
+    sleep "$backoff"
+  fi
+done
+[ "$fetch_ok" -eq 1 ] || die "$REPO: hg fetch failed after 3 attempts (upstream unreachable?)"
 
 # Map cinnabar's remote refs to the layout we publish.
 DEFAULT_REF="refs/remotes/hg/branches/default/tip"

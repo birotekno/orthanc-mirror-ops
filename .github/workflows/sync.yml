@@ -56,11 +56,18 @@ jobs:
   sync:
     needs: plan
     runs-on: ubuntu-latest
+    # Generous enough for a from-scratch convert of orthanc core (~1 min locally)
+    # plus two backoff waits, but far below the 6h default so a hung fetch fails
+    # fast instead of burning a runner all morning.
+    timeout-minutes: 30
     strategy:
       # One broken repo must not mask the state of the other 22.
       fail-fast: false
-      # Be a polite guest on UCLouvain's server. Do not raise this.
-      max-parallel: 4
+      # Be a polite guest on UCLouvain's server. Do NOT raise this.
+      # At 4, 4/23 jobs failed with connection timeouts (2026-07-16) while the
+      # server was perfectly responsive to a single client -- we were the load.
+      # sync.sh also retries with backoff; both matter.
+      max-parallel: 2
       matrix:
         repo: ${{ fromJson(needs.plan.outputs.matrix) }}
     steps:
