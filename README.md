@@ -84,22 +84,37 @@ A version bump can change the mapping and rewrite history unattended. `CINNABAR_
 is pinned in the workflow and asserted at runtime. Upgrade deliberately: bump, run one
 repo, compare SHAs, then roll out.
 
-**2. Be a polite guest.** `orthanc.uclouvain.be` is one university's server. The bootstrap
-is deliberately serial and CI is capped at 4 parallel jobs, once a day. Don't raise it.
+**2. Be a polite guest — this one already bit us.** `orthanc.uclouvain.be` is one university's
+server. On 2026-07-16 a matrix at `max-parallel: 4` had **4 of 23 jobs fail** unable to even open
+a TCP connection (~135s timeouts) — while the same server answered a single client in 0.23s. We
+were the load. Re-running the same 4 at `max-parallel: 2` succeeded immediately.
+
+So: the bootstrap is serial, CI is capped at **2**, and `sync.sh` retries the hg fetch 3× with
+60s/120s backoff. Don't raise the cap. If you see connection timeouts, the answer is *less*
+concurrency, not more retries.
 
 ## Testing
 
-Verified end-to-end against live upstream on 2026-07-16 (`orthanc-gdcm`, 117 commits):
+Verified end-to-end against live upstream, 2026-07-16:
 
-- **Fidelity** — `git cinnabar git2hg` on the converted tip returns `3b96baa5caa6`,
-  identical to `hg identify` against the live server.
-- **Determinism** — a clone with no metadata seeded produced byte-identical SHAs across
-  all 10 branches.
-- **Stateless CI path** — work dir deleted, metadata restored from GitHub alone: reports
-  `[up to date]`, same SHAs.
+- **Fidelity, all 23 repos** — `git cinnabar git2hg` on each converted tip matches
+  `hg identify -r default` against the live server. 23/23.
+  > Use `hg identify -r default`, **not** bare `hg identify` — the latter returns the repo's
+  > *global* tip, which for `orthanc` sits on the `streaming` branch, not `default`. A naive
+  > comparison reports a false mismatch (or passes by luck when tip happens to be on default).
+- **Determinism** — a clone with no metadata seeded produced byte-identical SHAs across all
+  branches; and CI (ubuntu/x86_64) reproduced the local (macOS/arm64) SHAs exactly. Same hg
+  changeset → same git SHA, across machines and architectures.
+- **Stateless CI path** — work dir deleted, metadata restored from GitHub alone: `[up to date]`,
+  same SHAs.
 - **Idempotency** — second run with no upstream change pushes nothing.
 - **The fork-later guarantee** — a real commit pushed to `main`, then a sync run: `main`
-  survived untouched.
+  survived untouched. `bootstrap.sh` re-run likewise left an existing `main` alone.
+- **No rewrite** — after CI synced `orthanc`, its tip still matched the local bootstrap
+  (`c0544ff51`, 6686 commits, 161 refs).
+
+**Not yet exercised:** the hg-fetch retry/backoff path. Lowering `max-parallel` to 2 stopped the
+timeouts before a retry ever fired, so that code is correct by inspection but unproven in anger.
 
 ## Licensing
 
